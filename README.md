@@ -26,37 +26,42 @@ Portal web para consultar precios de combustible en gasolineras de España en ti
 
 ## Instalación
 
-### Backend
+### Desarrollo local
 
 ```bash
-cd backend
-npm install
-```
+# Instalar todas las dependencias
+npm run install:all
 
-### Frontend
-
-```bash
-cd frontend
-npm install
+# O manualmente:
+cd backend && npm install
+cd ../frontend && npm install
+cd ..
 ```
 
 ## Ejecución
 
-### Backend (puerto 3001)
+### Desarrollo local
 
 ```bash
-cd backend
+# Ambos servicios (backend + frontend)
 npm run dev
-```
 
-### Frontend (puerto 5173)
-
-```bash
-cd frontend
-npm run dev
+# O por separado:
+npm run dev:backend   # Puerto 3001
+npm run dev:frontend  # Puerto 5173
 ```
 
 Abre tu navegador en `http://localhost:5173`
+
+### Producción (Vercel)
+
+```bash
+# Instalar Vercel CLI
+npm install -g vercel
+
+# Deploy
+vercel
+```
 
 ## Uso
 
@@ -79,25 +84,27 @@ Abre tu navegador en `http://localhost:5173`
 
 ```
 precio-gasolina/
-├── backend/
+├── api/                         # Serverless functions (Vercel)
+│   └── stations/
+│       └── province/[id].js     # Proxy API MITECO
+├── backend/                     # Backend Express (desarrollo local)
 │   ├── src/
-│   │   ├── server.js          # Servidor Express
-│   │   ├── routes/            # Rutas API
-│   │   ├── services/          # Cliente MITECO con cache
-│   │   └── utils/             # Utilidades (cache)
+│   │   ├── server.js
+│   │   ├── routes/
+│   │   ├── services/
+│   │   └── utils/
 │   └── package.json
 ├── frontend/
 │   ├── src/
-│   │   ├── components/        # Componentes React
-│   │   │   ├── Map/           # Mapa y marcadores
-│   │   │   ├── Filters/       # Filtros
-│   │   │   └── UI/            # Componentes reutilizables
-│   │   ├── hooks/             # Custom hooks
-│   │   ├── services/          # API client
-│   │   ├── store/             # Estado global (Zustand)
-│   │   ├── utils/             # Utilidades
-│   │   └── data/              # Datos estáticos (provincias)
+│   │   ├── components/
+│   │   ├── hooks/
+│   │   ├── services/
+│   │   ├── store/
+│   │   ├── utils/
+│   │   └── data/
 │   └── package.json
+├── vercel.json                  # Configuración Vercel
+├── package.json                 # Scripts raíz
 └── README.md
 ```
 
