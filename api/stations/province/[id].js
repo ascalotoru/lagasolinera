@@ -1,5 +1,3 @@
-import fetch from 'node-fetch';
-
 const MITECO_API_URL = 'https://sedeaplicaciones.minetur.gob.es/ServiciosRESTCarburantes/PreciosCarburantes';
 
 export default async function handler(req, res) {
