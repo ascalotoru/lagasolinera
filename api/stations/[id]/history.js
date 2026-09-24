@@ -6,6 +6,10 @@ export default async function handler(req, res) {
   }
 
   try {
+    if (!process.env.TURSO_DATABASE_URL) {
+      throw new Error('TURSO_DATABASE_URL not configured');
+    }
+
     await initDatabase();
 
     const { id } = req.query;
@@ -23,6 +27,10 @@ export default async function handler(req, res) {
     res.status(200).json({ station, history });
   } catch (error) {
     console.error('Error fetching history:', error);
-    res.status(500).json({ error: 'Failed to fetch price history' });
+    res.status(500).json({ 
+      error: 'Failed to fetch price history',
+      message: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 }
