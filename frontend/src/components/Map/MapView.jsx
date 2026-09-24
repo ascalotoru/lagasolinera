@@ -188,13 +188,6 @@ export function MapView({ userLocation }) {
           .setLngLat([lng, lat])
           .addTo(map);
 
-        element.addEventListener('click', () => {
-          map.flyTo({
-            center: [lng, lat],
-            duration: 1000,
-          });
-        });
-
         const popupDiv = document.createElement('div');
         const popupRoot = createRoot(popupDiv);
         popupRoot.render(<StationPopup station={feature.properties} />);
@@ -212,22 +205,16 @@ export function MapView({ userLocation }) {
   }, [updateMarkers]);
 
   useEffect(() => {
-    if (mapReady && updateMarkersRef.current) {
-      updateMarkersRef.current();
-    }
-  }, [stations, selectedFuel, mapReady]);
-
-  useEffect(() => {
     if (!mapReady || !mapRef.current) return;
 
     const map = mapRef.current;
 
     const loadStationsForProvinces = async (provinces) => {
-      if (loadingRef.current) return;
+      if (loadingRef.current) return false;
 
       const provincesToLoad = provinces.filter((id) => !loadedProvincesRef.current.has(id));
 
-      if (provincesToLoad.length === 0) return;
+      if (provincesToLoad.length === 0) return false;
 
       loadingRef.current = true;
       setLoading(true);
@@ -241,24 +228,29 @@ export function MapView({ userLocation }) {
             loadedProvincesRef.current.add(provinceId);
           })
         );
+        return true;
       } catch (error) {
         setError(error.message);
+        return false;
       } finally {
         setLoading(false);
         loadingRef.current = false;
       }
     };
 
-    const handleMoveEnd = () => {
+    const handleMoveEnd = async () => {
       const bounds = map.getBounds();
       const provinces = getProvincesForViewport(bounds);
-      loadStationsForProvinces(provinces);
-      if (updateMarkersRef.current) {
+      const loaded = await loadStationsForProvinces(provinces);
+      
+      // Solo actualizar marcadores si se cargaron nuevas provincias
+      if (loaded && updateMarkersRef.current) {
         updateMarkersRef.current();
       }
     };
 
     const handleZoomEnd = () => {
+      // Actualizar marcadores en zoom para clustering
       if (updateMarkersRef.current) {
         updateMarkersRef.current();
       }
@@ -268,11 +260,16 @@ export function MapView({ userLocation }) {
     map.on('moveend', handleMoveEnd);
     map.on('zoomend', handleZoomEnd);
 
+    // Actualizar marcadores cuando cambia el combustible seleccionado
+    if (updateMarkersRef.current) {
+      updateMarkersRef.current();
+    }
+
     return () => {
       map.off('moveend', handleMoveEnd);
       map.off('zoomend', handleZoomEnd);
     };
-  }, [mapReady, setStations, setLoading, setError]);
+  }, [mapReady, selectedFuel, setStations, setLoading, setError]);
 
   return (
     <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />

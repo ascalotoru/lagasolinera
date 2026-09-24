@@ -12,6 +12,9 @@ Todos usan ESM (`"type": "module"`).
 ## Commands
 
 ```bash
+# Instalación inicial (todas las dependencias)
+npm run install:all
+
 # Desarrollo (ambos servicios)
 npm run dev
 

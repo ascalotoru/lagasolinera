@@ -1,15 +1,17 @@
+import { Routes, Route } from 'react-router-dom';
 import { MapView } from './components/Map/MapView';
 import { FuelTypeFilter } from './components/Filters/FuelTypeFilter';
 import { NearbyStations } from './components/Sidebar/NearbyStations';
 import { FavoritesList } from './components/Sidebar/FavoritesList';
 import { DiscountPanel } from './components/Sidebar/DiscountPanel';
+import { HistoryPage } from './pages/HistoryPage';
 import { useGeolocation } from './hooks/useGeolocation';
 import { useStore } from './store/useStore';
 import { useFavoritesStore } from './store/useFavoritesStore';
 import { useDiscountsStore } from './store/useDiscountsStore';
 import { useEffect, useState } from 'react';
 
-function App() {
+function MapApp() {
   const { location, error, loading } = useGeolocation();
   const storeLoading = useStore((state) => state.loading);
   const storeError = useStore((state) => state.error);
@@ -54,6 +56,15 @@ function App() {
         </div>
       )}
     </div>
+  );
+}
+
+function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<MapApp />} />
+      <Route path="/history/:stationId" element={<HistoryPage />} />
+    </Routes>
   );
 }
 

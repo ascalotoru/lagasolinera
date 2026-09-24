@@ -56,6 +56,10 @@ export function StationPopup({ station }) {
     }
   };
 
+  const handleHistoryClick = () => {
+    window.open(`/history/${station['IDEESS']}`, '_blank');
+  };
+
   return (
     <div className="w-[300px]">
       <h3 className="font-bold text-lg mb-2 pr-8">{station['Rótulo']}</h3>
@@ -70,13 +74,22 @@ export function StationPopup({ station }) {
           <div className="mt-3 pt-3 border-t">
             <div className="flex justify-between items-start">
               <p className="text-xs font-semibold text-gray-700 mb-2">Precios</p>
-              <button
-                onClick={handleFavoriteClick}
-                className={`text-2xl ${favorite ? 'text-red-500' : 'text-gray-300'} hover:scale-110 transition-transform`}
-                aria-label={favorite ? 'Quitar de favoritos' : 'Añadir a favoritos'}
-              >
-                ♥
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleHistoryClick}
+                  className="text-xs text-blue-600 hover:text-blue-800 underline"
+                  title="Ver histórico de precios"
+                >
+                  Histórico
+                </button>
+                <button
+                  onClick={handleFavoriteClick}
+                  className={`text-2xl ${favorite ? 'text-red-500' : 'text-gray-300'} hover:scale-110 transition-transform`}
+                  aria-label={favorite ? 'Quitar de favoritos' : 'Añadir a favoritos'}
+                >
+                  ♥
+                </button>
+              </div>
             </div>
             <div className="space-y-1.5 max-h-[300px] overflow-y-auto">
               {availableFuels.map((fuel) => (
