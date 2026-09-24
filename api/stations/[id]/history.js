@@ -1,4 +1,4 @@
-import { initDatabase, getStationHistory, getStation } from '../../../../shared/db.js';
+import { createClient } from '@libsql/client';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -10,7 +10,10 @@ export default async function handler(req, res) {
       throw new Error('TURSO_DATABASE_URL not configured');
     }
 
-    await initDatabase();
+    const client = createClient({
+      url: process.env.TURSO_DATABASE_URL,
+      authToken: process.env.TURSO_AUTH_TOKEN,
+    });
 
     const { id } = req.query;
     const { fuelType, days } = req.query;
@@ -19,12 +22,38 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Station ID required' });
     }
 
-    const daysNum = days ? parseInt(days) : null;
-    const history = await getStationHistory(id, fuelType || null, daysNum);
-    const station = await getStation(id);
+    let sql = `
+      SELECT station_id, fuel_type, price, created_at
+      FROM price_history
+      WHERE station_id = ?
+    `;
+    const args = [id];
+
+    if (fuelType) {
+      sql += ' AND fuel_type = ?';
+      args.push(fuelType);
+    }
+
+    if (days) {
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - parseInt(days));
+      sql += ' AND created_at >= ?';
+      args.push(startDate.toISOString());
+    }
+
+    sql += ' ORDER BY created_at ASC';
+
+    const historyResult = await client.execute({ sql, args });
+    const stationResult = await client.execute({
+      sql: 'SELECT * FROM stations WHERE station_id = ?',
+      args: [id],
+    });
 
     res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate');
-    res.status(200).json({ station, history });
+    res.status(200).json({ 
+      station: stationResult.rows[0], 
+      history: historyResult.rows 
+    });
   } catch (error) {
     console.error('Error fetching history:', error);
     res.status(500).json({ 
