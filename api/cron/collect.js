@@ -55,6 +55,68 @@ async function initDatabase(client) {
     CREATE INDEX IF NOT EXISTS idx_price_history_station_fuel_date
     ON price_history (station_id, fuel_type, created_at)
   `);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS collection_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      started_at TEXT NOT NULL,
+      finished_at TEXT,
+      status TEXT NOT NULL,
+      phase TEXT,
+      source TEXT,
+      stations INTEGER,
+      prices INTEGER,
+      duration_ms INTEGER,
+      fetch_ms INTEGER,
+      stations_ms INTEGER,
+      prices_ms INTEGER,
+      error TEXT
+    )
+  `);
+}
+
+async function startCollectionLog(client, source) {
+  const result = await client.execute({
+    sql: `INSERT INTO collection_logs (started_at, status, source) VALUES (?, 'running', ?)`,
+    args: [new Date().toISOString(), source],
+  });
+  return Number(result.lastInsertRowid);
+}
+
+async function updateCollectionLog(client, id, fields) {
+  const keys = Object.keys(fields);
+  if (keys.length === 0) return;
+  const sets = keys.map((k) => `${k} = ?`).join(', ');
+  const args = keys.map((k) => fields[k]);
+  await client.execute({
+    sql: `UPDATE collection_logs SET ${sets} WHERE id = ?`,
+    args: [...args, id],
+  });
+}
+
+async function finishCollectionLog(client, id, { status, phase, stations, prices, durationMs, error }) {
+  await updateCollectionLog(client, id, {
+    status,
+    phase: phase ?? null,
+    stations: stations ?? null,
+    prices: prices ?? null,
+    duration_ms: durationMs ?? null,
+    finished_at: new Date().toISOString(),
+    error: error ?? null,
+  });
+}
+
+async function markStaleCollectionLogs(client, timeoutMs = 15 * 60 * 1000) {
+  const cutoff = new Date(Date.now() - timeoutMs).toISOString();
+  await client.execute({
+    sql: `
+      UPDATE collection_logs
+      SET status = 'timeout', finished_at = ?,
+          error = COALESCE(error, 'Sin finalizar (posible timeout de la function)')
+      WHERE status = 'running' AND started_at < ?
+    `,
+    args: [new Date().toISOString(), cutoff],
+  });
 }
 
 async function upsertStationsBatch(client, stations) {
@@ -116,51 +178,94 @@ export default async function handler(req, res) {
       authToken: process.env.TURSO_AUTH_TOKEN,
     });
 
-    console.log('[Collector] Starting price collection...');
     await initDatabase(client);
+    await markStaleCollectionLogs(client);
 
-    const url = `${MITECO_API_URL}/EstacionesTerrestres`;
-    const response = await fetch(url, {
-      headers: { 'Accept': 'application/json' },
-    });
+    const source = process.env.VERCEL ? 'vercel' : 'local';
+    const logId = await startCollectionLog(client, source);
+    const t0 = Date.now();
 
-    if (!response.ok) {
-      throw new Error(`MITECO API error: ${response.status} ${response.statusText}`);
-    }
+    try {
+      console.log(`[Collector] Starting price collection (log #${logId})...`);
 
-    const data = await response.json();
-    const stations = data.ListaEESSPrecio || [];
+      const tFetch = Date.now();
+      const url = `${MITECO_API_URL}/EstacionesTerrestres`;
+      const response = await fetch(url, {
+        headers: { 'Accept': 'application/json' },
+      });
 
-    console.log(`[Collector] Fetched ${stations.length} stations`);
-
-    const validStations = stations.filter((s) => s['IDEESS']);
-    await upsertStationsBatch(client, validStations);
-
-    const prices = [];
-    for (const station of validStations) {
-      const stationId = station['IDEESS'];
-
-      for (const fuelField of FUEL_FIELDS) {
-        const priceStr = station[fuelField];
-        if (!priceStr || priceStr === '') continue;
-
-        const price = parseFloat(priceStr.replace(',', '.'));
-        if (isNaN(price)) continue;
-
-        prices.push({ stationId, fuelType: fuelField, price });
+      if (!response.ok) {
+        throw new Error(`MITECO API error: ${response.status} ${response.statusText}`);
       }
+
+      const data = await response.json();
+      const stations = data.ListaEESSPrecio || [];
+      const fetchMs = Date.now() - tFetch;
+      const validStations = stations.filter((s) => s['IDEESS']);
+
+      console.log(`[Collector] Fetched ${stations.length} stations in ${fetchMs}ms`);
+      await updateCollectionLog(client, logId, {
+        phase: 'fetched',
+        fetch_ms: fetchMs,
+      });
+
+      const tStations = Date.now();
+      await upsertStationsBatch(client, validStations);
+      const stationsMs = Date.now() - tStations;
+
+      await updateCollectionLog(client, logId, {
+        phase: 'stations_upserted',
+        stations_ms: stationsMs,
+        stations: validStations.length,
+      });
+
+      const prices = [];
+      for (const station of validStations) {
+        const stationId = station['IDEESS'];
+
+        for (const fuelField of FUEL_FIELDS) {
+          const priceStr = station[fuelField];
+          if (!priceStr || priceStr === '') continue;
+
+          const price = parseFloat(priceStr.replace(',', '.'));
+          if (isNaN(price)) continue;
+
+          prices.push({ stationId, fuelType: fuelField, price });
+        }
+      }
+
+      const tPrices = Date.now();
+      await insertPriceHistoryBatch(client, prices);
+      const pricesMs = Date.now() - tPrices;
+
+      console.log(`[Collector] Inserted ${prices.length} prices in ${pricesMs}ms`);
+      await updateCollectionLog(client, logId, { prices_ms: pricesMs });
+      await finishCollectionLog(client, logId, {
+        status: 'success',
+        phase: 'completed',
+        stations: validStations.length,
+        prices: prices.length,
+        durationMs: Date.now() - t0,
+      });
+
+      res.status(200).json({
+        success: true,
+        stations: validStations.length,
+        prices: prices.length,
+        fetchMs,
+        stationsMs,
+        pricesMs,
+        totalMs: Date.now() - t0,
+      });
+    } catch (error) {
+      console.error(`[Collector] Error (log #${logId}):`, error);
+      await finishCollectionLog(client, logId, {
+        status: 'error',
+        durationMs: Date.now() - t0,
+        error: error.message,
+      });
+      throw error;
     }
-
-    console.log(`[Collector] Inserting ${prices.length} prices...`);
-    await insertPriceHistoryBatch(client, prices);
-
-    console.log(`[Collector] Done. ${validStations.length} stations, ${prices.length} prices stored.`);
-    
-    res.status(200).json({ 
-      success: true, 
-      stations: validStations.length, 
-      prices: prices.length 
-    });
   } catch (error) {
     console.error('Cron collect error:', error);
     res.status(500).json({ error: 'Failed to collect prices', message: error.message });

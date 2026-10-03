@@ -46,6 +46,77 @@ export async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_price_history_station_fuel_date
     ON price_history (station_id, fuel_type, created_at)
   `);
+
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS collection_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      started_at TEXT NOT NULL,
+      finished_at TEXT,
+      status TEXT NOT NULL,
+      phase TEXT,
+      source TEXT,
+      stations INTEGER,
+      prices INTEGER,
+      duration_ms INTEGER,
+      fetch_ms INTEGER,
+      stations_ms INTEGER,
+      prices_ms INTEGER,
+      error TEXT
+    )
+  `);
+}
+
+export async function startCollectionLog(source = 'unknown') {
+  const startedAt = new Date().toISOString();
+  const result = await client.execute({
+    sql: `INSERT INTO collection_logs (started_at, status, source) VALUES (?, 'running', ?)`,
+    args: [startedAt, source],
+  });
+  return { id: Number(result.lastInsertRowid), startedAt };
+}
+
+export async function updateCollectionLog(id, fields) {
+  const keys = Object.keys(fields);
+  if (keys.length === 0) return;
+  const sets = keys.map((k) => `${k} = ?`).join(', ');
+  const args = keys.map((k) => fields[k]);
+  await client.execute({
+    sql: `UPDATE collection_logs SET ${sets} WHERE id = ?`,
+    args: [...args, id],
+  });
+}
+
+export async function finishCollectionLog(id, { status, phase, stations, prices, durationMs, error }) {
+  await updateCollectionLog(id, {
+    status,
+    phase: phase ?? null,
+    stations: stations ?? null,
+    prices: prices ?? null,
+    duration_ms: durationMs ?? null,
+    finished_at: new Date().toISOString(),
+    error: error ?? null,
+  });
+}
+
+export async function markStaleCollectionLogs(timeoutMs = 15 * 60 * 1000) {
+  const cutoff = new Date(Date.now() - timeoutMs).toISOString();
+  await client.execute({
+    sql: `
+      UPDATE collection_logs
+      SET status = 'timeout', finished_at = ?,
+          error = COALESCE(error, 'Sin finalizar (posible timeout de la function)')
+      WHERE status = 'running' AND started_at < ?
+    `,
+    args: [new Date().toISOString(), cutoff],
+  });
+}
+
+export async function getRecentCollectionLogs(limit = 50) {
+  const result = await client.execute({
+    sql: 'SELECT * FROM collection_logs ORDER BY id DESC LIMIT ?',
+    args: [limit],
+  });
+  return result.rows;
 }
 
 export async function upsertStationsBatch(stations) {

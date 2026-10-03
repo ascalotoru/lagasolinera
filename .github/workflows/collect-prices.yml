@@ -10,4 +10,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger price collection
-        run: curl -f https://precio-gasolina.vercel.app/api/cron/collect
+        run: |
+          base="https://precio-gasolina.vercel.app"
+          code=$(curl -sS --max-time 330 -o /tmp/collect.json -w '%{http_code}' "$base/api/cron/collect") || code="000"
+          echo "HTTP $code"
+          echo "Response: $(cat /tmp/collect.json 2>/dev/null)"
+          if [ "$code" != "200" ]; then
+            echo "::error::Collection failed with HTTP $code"
+            echo "--- Recent collection logs ---"
+            curl -sS --max-time 30 "$base/api/logs?limit=10" || true
+            echo
+            exit 1
+          fi
