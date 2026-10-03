@@ -21,7 +21,7 @@ Portal web para consultar precios de combustible en gasolineras de España en ti
 
 ## Requisitos
 
-- Node.js 18+
+- Node.js 24.x (ver `.nvmrc`)
 - npm 9+
 
 ## Instalación

@@ -1,64 +1,67 @@
 # LaGasolinera - Agent Instructions
 
-## Architecture
+App de precios de combustible (España). Monorepo ESM (`"type": "module"` en cada package). Node 24.x.
 
-Monorepo con frontend, backend local y serverless functions:
-- `api/` - Serverless functions para Vercel (producción)
-- `backend/` - Proxy Express para desarrollo local (puerto 3001)
-- `frontend/` - Vite + React + MapLibre + Tailwind (puerto 5173, HTTPS)
+## Layout
 
-Todos usan ESM (`"type": "module"`).
+- `api/` - Serverless functions Vercel (producción). Rutas dinámicas `[id].js`.
+- `backend/` - Proxy Express dev local (puerto 3001). Reutiliza `shared/`.
+- `frontend/` - Vite + React 18 + MapLibre + Tailwind (5173, HTTPS). Router: `/` mapa, `/history/:stationId` gráfico.
+- `shared/` - `db.js` (Turso/local SQLite) + `priceCollector.js`. **Solo usado por `backend/` y `scripts/`.** Ver gotcha de Vercel abajo.
+- `scripts/collect.js` - recolección manual.
 
 ## Commands
 
 ```bash
-# Instalación inicial (todas las dependencias)
-npm run install:all
-
-# Desarrollo (ambos servicios)
-npm run dev
-
-# Por separado
-npm run dev:backend    # Puerto 3001
-npm run dev:frontend   # Puerto 5173 (HTTPS)
-
-# Producción
+npm run install:all    # root + backend + frontend
+npm run dev            # backend + frontend
+npm run dev:backend    # 3001
+npm run dev:frontend   # 5173 HTTPS
+npm run collect        # recolección manual (requiere .env)
 cd frontend && npm run build
-vercel                 # Deploy a Vercel
+pnpm exec vercel --prod --force  # deploy producción (vercel ^62.1.0 devDep root, CLI 62.x, Node 24)
 ```
 
-No hay tests, lint, ni CI configurados.
+No hay tests, lint ni typecheck. Verificación = `npm run build` + `curl` a endpoints.
 
-## Important Context
+## Node 24
 
-- **HTTPS obligatorio en frontend**: Requerido para geolocalización en móviles. Usa `@vitejs/plugin-basic-ssl` con certificado autofirmado.
-- **API MITECO**: Backend/serverless hace proxy a `https://sedeaplicaciones.minetur.gob.es/ServiciosRESTCarburantes/PreciosCarburantes`. Cache de 1 hora (memoria en backend, HTTP en Vercel).
-- **CORS**: Backend usa `cors()` middleware. Frontend usa proxy de Vite en desarrollo (`/api` → `localhost:3001`). En producción, Vercel routing maneja `/api/*` → serverless functions.
-- **Geolocalización**: Firefox móvil requiere HTTPS. Si deniega permiso, instrucciones en mensaje de error.
-- **Mapa**: Carga gasolineras por provincia según viewport (centro + adyacentes). Clustering con Supercluster.
-- **Estado**: Zustand stores separados para estaciones, favoritos y descuentos. Todos persistentes en localStorage.
-- **Marcadores**: Se crean con `createRoot()` dinámicamente. El popup muestra todos los precios de todos los combustibles.
-- **Descuentos**: Por marca (extraída de `Rótulo` con `brandExtractor.js`), no por gasolinera individual.
+- `engines.node: "24.x"` en los 3 `package.json` + `.nvmrc` (`24`). Vercel ya sirve `nodeVersion: "24.x"` (verificado vía API).
+- No usar `node-fetch`: Node 24 trae `fetch` global. Importarlo es deuda.
+- CLI Vercel local (56.x) corría en Node 22 y fallaba builds; usar `pnpm exec vercel` (62.1.0, Node 24).
 
-## Data Flow
+## Gotchas Vercel (crítico)
 
-1. Usuario mueve mapa → `getProvincesForViewport()` calcula provincias
-2. Frontend pide provincias no cargadas → API `/api/stations/province/:id`
-3. Desarrollo: Backend Express cachea 1h en memoria
-4. Producción: Vercel serverless con cache HTTP (s-maxage=3600)
-5. Frontend actualiza Zustand store
-6. `updateMarkers()` re-renderiza clusters con Supercluster
-7. Cambios en `selectedFuel` recalculan precios con descuentos aplicados
+- **Las serverless functions NO pueden importar de `shared/`.** Vercel solo empaqueta lo que está bajo `api/`; un import a `../../shared/db.js` falla en runtime con `ERR_MODULE_NOT_FOUND: /var/shared/...`. Duplica la lógica dentro del archivo de `api/` (ver `api/cron/collect.js` y `api/stations/[id]/history.js`, que inlinean DB/client en lugar de importar).
+- **Editar `shared/` no afecta a producción.** Cualquier cambio de lógica compartida debe replicarse en la función `api/` correspondiente.
+- **No añadir `functions.runtime` a `vercel.json`.** `@vercel/node@latest` es inválido y rompe el build con `Function Runtimes must have a valid version`. Deja que Vercel autodetecte (Node 24.x vía `engines`).
+- **Vercel cachea el código de las functions.** Tras cambiar una función, desplegar con `vercel --prod --force` o seguirá sirviendo la versión antigua (síntoma: el error apunta a código ya borrado).
+- `vercel.json` reescribe todo excepto `/api/*` a `/index.html` (SPA). No romper ese patrón.
 
-## Deployment (Vercel)
+## Base de datos / histórico de precios
 
-- `vercel.json` configura routing: `/api/*` → serverless, resto → frontend estático
-- Serverless functions en `api/stations/province/[id].js`
-- Frontend build: `frontend/dist/`
-- Deploy automático desde GitHub
+- `shared/db.js` y las functions de `api/` eligen backend según env: si existe `TURSO_DATABASE_URL` → Turso (producción); si no → `local.db` (gitignored).
+- Vars necesarias: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` (en `.env` local y en env de Vercel).
+- Tablas: `stations` (upsert por `station_id` = `IDEESS`) y `price_history`. Los precios se insertan en batch.
+- **Los datos viven en Turso (externo): NO se borran al desplegar.** Si falta histórico, revisar el cron, no el deploy.
+- Recolección: cada 8h. Vercel Hobby solo permite crons diarios, por eso `.github/workflows/collect-prices.yml` hace `curl` a `GET /api/cron/collect` (`0 */8 * * *`). El handler acepta GET y POST; el backend local solo POST.
+- `api/cron/collect.js` inyecta `node-fetch` no; usa `fetch` global y `@libsql/client` directo.
 
-## Mobile Testing
+## Datos / API MITECO
 
-Accede desde móvil en la misma red: `https://192.168.99.3:5173/`
+- Proxy a `https://sedeaplicaciones.minetur.gob.es/ServiciosRESTCarburantes/PreciosCarburantes`.
+- Cache: memoria 1h en backend, `Cache-Control: s-maxage=3600` en `/api/stations/province/:id`; `s-maxage=300` en history.
+- Frontend llama rutas relativas `/api/...`; Vite proxya a `localhost:3001` en dev; en prod Vercel enruta.
+- Campos MITECO con acentos (`Rótulo`, `Dirección`) y decimales con coma (`.replace(',', '.')`).
 
-Acepta certificado autofirmado en Firefox móvil.
+## Frontend
+
+- **HTTPS obligatorio** (`@vitejs/plugin-basic-ssl`, cert autofirmado): requerido para geolocalización en móvil (Firefox). Probar en misma red: `https://<ip>:5173/`.
+- Estado en Zustand, persistido en localStorage: `useStore` (estaciones), `useFavoritesStore`, `useDiscountsStore`.
+- `selectedFuel` recalcula precios con descuentos (por marca vía `brandExtractor.js`, no por gasolinera).
+- Marcadores con `createRoot()` dinámico; clustering con Supercluster; carga por provincia según viewport.
+
+## Deploy
+
+- Push a `main` + `vercel --prod --force`. Producción: https://precio-gasolina.vercel.app
+- `vercel.json`: `buildCommand` instala root + frontend y buildea; `outputDirectory` = `frontend/dist`.

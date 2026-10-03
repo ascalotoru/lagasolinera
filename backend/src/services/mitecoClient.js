@@ -1,4 +1,3 @@
-import fetch from 'node-fetch';
 import { cache } from '../utils/cache.js';
 
 const MITECO_API_URL = process.env.MITECO_API_URL;

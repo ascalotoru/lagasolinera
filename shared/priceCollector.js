@@ -1,4 +1,3 @@
-import fetch from 'node-fetch';
 import { initDatabase, upsertStationsBatch, insertPriceHistoryBatch } from './db.js';
 
 const MITECO_API_URL = 'https://sedeaplicaciones.minetur.gob.es/ServiciosRESTCarburantes/PreciosCarburantes';
