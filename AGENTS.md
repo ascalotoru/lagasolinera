@@ -44,10 +44,12 @@ No hay tests, lint ni typecheck. Verificación = `npm run build` + `curl` a endp
 - Vars necesarias: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` (en `.env` local y en env de Vercel).
 - Tablas: `stations` (upsert por `station_id` = `IDEESS`), `price_history` y `collection_logs`.
 - **Logs de recolección**: cada intento escribe en `collection_logs` (status `running`→`success`/`error`, fases `fetched`/`stations_upserted`, timings `fetch_ms`/`stations_ms`/`prices_ms`, `error`). Leer vía `GET /api/logs?limit=N` (prod) o `GET /api/cron/logs` (backend local).
-- **Timeout conocido**: la function de Vercel muere a los 300s (Hobby) y devuelve 504; si un log queda en `running` con `phase` y sin `finished_at`, la recolección se colgó en esa fase. `markStaleCollectionLogs` lo marca `timeout` en el siguiente run.
+- **Timeout conocido (Vercel)**: la function de Vercel muere a los 300s (Hobby) y devuelve 504; si un log queda en `running` con `phase` y sin `finished_at`, la recolección se colgó en esa fase. `markStaleCollectionLogs` lo marca `timeout` en el siguiente run. Por eso la recolección **no** corre en Vercel por defecto.
 - **Los datos viven en Turso (externo): NO se borran al desplegar.** Si falta histórico, revisar el cron, no el deploy.
-- Recolección: cada 8h. Vercel Hobby solo permite crons diarios, por eso `.github/workflows/collect-prices.yml` hace `curl` a `GET /api/cron/collect` (`0 */8 * * *`). El handler acepta GET y POST; el backend local solo POST. El workflow imprime el body y `GET /api/logs` cuando falla.
-- `api/cron/collect.js` no usa `node-fetch`; usa `fetch` global y `@libsql/client` directo. La instrumentación de logs está duplicada en `api/cron/collect.js` (Vercel) y `shared/priceCollector.js` (backend/scripts).
+- Recolección: cada 8h vía `.github/workflows/collect-prices.yml`, que ejecuta `node scripts/collect.js` en el runner (Node 24, `npm ci --omit=dev`) con `source=github`. Requiere secrets de repo `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` (`gh secret set`). El endpoint Vercel `GET|POST /api/cron/collect` queda solo para disparo manual; el backend local solo POST.
+- Aviso: GitHub desactiva los workflows programados tras 60 días sin actividad del repo.
+- Local: `npm run collect` (recolecta) y `npm run logs` (últimos `collection_logs`).
+- `api/cron/collect.js` no usa `node-fetch`; usa `fetch` global y `@libsql/client` directo. La instrumentación de logs está duplicada en `api/cron/collect.js` (Vercel) y `shared/priceCollector.js` (GitHub/backend/scripts).
 
 ## Datos / API MITECO
 

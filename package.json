@@ -11,7 +11,8 @@
     "dev:frontend": "cd frontend && npm run dev",
     "build": "cd frontend && npm run build",
     "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
-    "collect": "node scripts/collect.js"
+    "collect": "node scripts/collect.js",
+    "logs": "node scripts/logs.js"
   },
   "dependencies": {
     "@libsql/client": "^0.14.0",
